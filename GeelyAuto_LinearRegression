@@ -1,0 +1,254 @@
+A Chinese automobile company Geely Auto aspires to enter the US market by setting up their manufacturing unit there and producing cars 
+locally to give competition to their US and European counterparts. They have contracted an automobile consulting company to understand 
+the factors on which the pricing of a car depends. Specifically, they want to understand the factors affecting the pricing of cars in the 
+American marketing, since those may be very different from the Chinese market. Essentially, the company wants to know:
+
+Goal of this assignment : Required to model the price of cars with the available independent variables. It will be used by the 
+management to understand how exactly the prices vary with the independent variables. They can accordingly manipulate the 
+design of the cars, the business strategy etc. to meet certain price levels. Further, the model will be a good way for the management 
+to understand the pricing dynamics of a new market. 
+
+
+##################Linear Regression Model- Case Study
+
+#install and load required packages
+
+install.packages("car")
+install.packages("dplyr")
+install.packages("tidyr")
+install.packages("MASS")
+library(tidyr)
+library(dplyr)
+library(car)
+library(MASS)
+
+# Load input data
+car_price<-read.csv("CarPrice_Assignment.csv")
+
+str(car_price)
+car_price_master <- car_price
+
+# Remove company and model columns
+car_price<-separate(car_price,CarName,c("Company", "Model") ,sep = " ")
+
+# removing the "model" variable as it is not required
+car_price<-car_price[, -4]
+
+
+# convert factors to Binary values -  0 is Gas, 1 is Diesel
+str(car_price$fueltype)
+levels(car_price$fueltype)<-c(1,0)
+car_price$fueltype<- as.numeric(levels(car_price$fueltype))[car_price$fueltype]
+
+# convert factors to Binary values - std is 1, turbo is 0
+str(car_price$aspiration)
+levels(car_price$aspiration)<-c(1,0)
+car_price$aspiration<- as.numeric(levels(car_price$aspiration))[car_price$aspiration]
+
+# convert factors to Binary values - four is 1, two is 0
+str(car_price$doornumber)	
+levels(car_price$doornumber)<-c(1,0)
+car_price$doornumber<- as.numeric(levels(car_price$doornumber))[car_price$doornumber]
+
+#Front is 1, rear is 0
+str(car_price$enginelocation)
+levels(car_price$enginelocation)<-c(1,0)
+car_price$enginelocation<- as.numeric(levels(car_price$enginelocation))[car_price$enginelocation]
+
+
+# a) Convert the categories of variables where values are more than 2
+##carbody
+str(car_price$carbody)
+
+# b) Creating Dummy variable for body-style : hardtop, wagon, sedan, hatchback, convertible. 
+bodyStyle1_dummy <- data.frame(model.matrix( ~carbody, data = car_price))
+
+# c) Removing first column x.Intercept as it is not needed
+bodyStyle1_dummy <- bodyStyle1_dummy[,-1]
+
+# d) Replace the newly created dummy varaibles in original dataframe with Old column
+as.data.frame(colnames(car_price))
+car_price1 <- cbind(car_price[,-7], bodyStyle1_dummy)
+
+# Similar approach of #a to #d for variables with values >2 categories
+##drivewheel, Engine type, num-of-cylinders, fuel-system
+
+# for "drivewheel" - drive-wheels: 4wd, fwd, rwd. 
+
+str(car_price1$drivewheel)
+driveWheels_dummy <- data.frame(model.matrix( ~drivewheel, data = car_price1))
+driveWheels_dummy <- driveWheels_dummy[,-1]
+as.data.frame(colnames(car_price1))
+car_price2 <- cbind(car_price1[,-7], driveWheels_dummy)
+
+# for "Engine type"  - dohc, dohcv, l, ohc, ohcf, ohcv, rotor. 
+
+str(car_price2$enginetype)
+engineType_dummy <- data.frame(model.matrix( ~enginetype, data = car_price2))
+engineType_dummy <- engineType_dummy[,-1]
+as.data.frame(colnames(car_price2))
+car_price3 <- cbind(car_price2[,-13], engineType_dummy)
+
+# for Cylinder number - num-of-cylinders: eight, five, four, six, three, twelve, two. 
+
+str(car_price3$cylindernumber)
+numofCyl_dummy <- data.frame(model.matrix( ~cylindernumber, data = car_price3))
+numofCyl_dummy <- numofCyl_dummy[,-1]
+as.data.frame(colnames(car_price3))
+car_price4 <- cbind(car_price3[,-13], numofCyl_dummy)
+
+# for fuel system - fuel-system: 1bbl, 2bbl, 4bbl, idi, mfi, mpfi, spdi, spfi.
+
+str(car_price4$fuelsystem)
+fuelSys_dummy <- data.frame(model.matrix( ~fuelsystem, data = car_price4))
+fuelSys_dummy <- fuelSys_dummy[,-1]
+as.data.frame(colnames(car_price4))
+car_price5 <- cbind(car_price4[,-14], fuelSys_dummy)
+str(car_price5)
+
+# Add new variable
+##Derived Metrics- CarSpace = Lenght* bredth * height
+car_price5$space<- car_price5$carlength*car_price5$carheight*car_price5$carwidth
+
+
+# test and train data set
+
+set.seed(100)
+
+trainindices= sample(1:nrow(car_price5), 0.7*nrow(car_price5))
+train = car_price5[trainindices,]
+test = car_price5[-trainindices,]
+
+#1st Model
+
+model_1<- lm(price~., data = train)
+summary(model_1)
+as.data.frame(colnames(train))
+
+# Removing "signulariteis " variables c("enginetypedohcv","enginetypel","cylindernumbertwelve", "fuelsystem4bbl","fuelsystemspfi","car id") 
+
+car_price5<-car_price5[, -c(1,28,29,36,38,42)]
+
+# running Train & test data
+set.seed(100)
+trainindices= sample(1:nrow(car_price5), 0.7*nrow(car_price5))
+train = car_price5[trainindices,]
+test = car_price5[-trainindices,]
+
+## Model after removing "Singularities"
+
+model_2<- lm(price~., data = train)
+summary(model_2)
+vif(model_2)
+#Error in Model 2, there are aliased coefficients in the model.
+
+#### Understing model with "Step AIC"
+step<-stepAIC(model_2, direction = "both")
+
+# Building model with taking out insignificant variables
+model_3<- lm(formula = price ~ Company + aspiration + enginelocation + wheelbase + carlength + 
+               carheight + curbweight + enginesize + stroke + horsepower + 
+               peakrpm + carbodywagon + drivewheelrwd + enginetypeohc + 
+               enginetyperotor + cylindernumberfive + fuelsystem2bbl + fuelsystemmpfi + 
+               space, data = train)
+
+
+summary(model_3)
+vif(model_3)
+# Removing - Horsepower which is having high p value
+
+model_4<- lm(formula = price ~ Company + aspiration + enginelocation + wheelbase + carlength + 
+               carheight + curbweight + enginesize + stroke +  
+               peakrpm + carbodywagon + drivewheelrwd + enginetypeohc + 
+               enginetyperotor + cylindernumberfive + fuelsystem2bbl + fuelsystemmpfi + 
+               space, data = train)
+summary(model_4)
+vif(model_4)
+
+# Removing  wheelbase which is relatively high vif and p value
+
+model_5<- lm(formula = price ~ Company + aspiration + enginelocation  + carlength + 
+               carheight + curbweight + enginesize + stroke +  
+               peakrpm + carbodywagon + drivewheelrwd + enginetypeohc + 
+               enginetyperotor + cylindernumberfive + fuelsystem2bbl + fuelsystemmpfi + 
+               space, data = train)
+summary(model_5)
+vif(model_5)
+
+
+# removing fuelsystemmpfi which is relatively high p value
+
+model_6<- lm(formula = price ~ Company + aspiration + enginelocation  + carlength + 
+               carheight + curbweight + enginesize + stroke +  
+               peakrpm + carbodywagon + drivewheelrwd + enginetypeohc + 
+               enginetyperotor + cylindernumberfive + fuelsystem2bbl + space, data = train)
+summary(model_6)
+vif(model_6)
+
+
+# removing fuelsystem2bbl due to high P value and vif
+
+model_7<- lm(formula = price ~ Company + aspiration + enginelocation  + carlength + 
+               carheight + curbweight + enginesize + stroke +  
+               peakrpm + carbodywagon + drivewheelrwd + enginetypeohc + 
+               enginetyperotor + cylindernumberfive  + space, data = train)
+summary(model_7)
+vif(model_7)
+
+
+# removing carbodywagon relatively high p value
+model_8<- lm(formula = price ~ Company + aspiration + enginelocation  + carlength + 
+               carheight + curbweight + enginesize + stroke +  
+               peakrpm  + drivewheelrwd + enginetypeohc + 
+               enginetyperotor + cylindernumberfive  + space, data = train)
+summary(model_8)
+vif(model_8)
+
+
+
+# removing enginetypeohc relatively high p value
+model_9<- lm(formula = price ~ Company + aspiration + enginelocation  + carlength + 
+               carheight + curbweight + enginesize + stroke +  
+               peakrpm  + drivewheelrwd + enginetypeohc + 
+               + cylindernumberfive  + space, data = train)
+summary(model_9)
+vif(model_9)
+
+# removing peakrpm relatively high p value
+model_10<- lm(formula = price ~ Company + aspiration + enginelocation  + carlength + 
+               carheight + curbweight + enginesize + stroke +  
+                drivewheelrwd + enginetypeohc + 
+               + cylindernumberfive  + space, data = train)
+summary(model_10)
+vif(model_10)
+
+
+### model 10 looks feasible with optimum p values ####
+
+#### Company has may sub-variables as a single lot
+# Build the model on test data 
+# checking the column number for test data to take out "price"
+as.data.frame(colnames(test))
+Predict_test <- predict(model_10,test[,-20])
+test$test_price <- Predict_test
+
+
+# Accuracy of the predictions
+# Calculate correlation
+r <- cor(test$price,test$test_price)
+# calculate R squared by squaring correlation
+rsquared <- cor(test$price,test$test_price)^2
+
+# check R-squared
+rsquared
+
+
+#### 0.8443087 of R-Squared variance observed---which is very good prediction
+
+### Therefore final model to predict Price is::
+
+### model_10<- lm(formula = price ~ Company + aspiration + enginelocation  + carlength + 
+#carheight + curbweight + enginesize + stroke +  
+  #drivewheelrwd + enginetypeohc + 
+  #+ cylindernumberfive  + space, data = train)
+

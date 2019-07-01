@@ -1,0 +1,325 @@
+The aim of analysis is to identify the root cause of the problem (i.e. cancellation and non-availability of cars) and 
+recommend ways to improve the situation. Present to the client the root cause(s) and possible hypotheses of the problem(s) and 
+recommend ways to improve them.  
+
+#Load below packages
+#install.packages("lubridate")
+#install.packages("ggplot2")
+#install.packages("chron")
+#install.packages("BBmisc")
+#install.packages("dplyr")
+# ipak function: install and load multiple R packages.
+# check to see if packages are installed. Install them if they are not, then load them into the R session.
+
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+
+# usage
+packages <- c("stringr","ggplot2", "dplyr", "BBmisc", "chron", "ggplot2", "lubridate")
+ipak(packages)
+
+
+#load uder data
+uberData <-read.csv("Uber Request Data.csv",stringsAsFactors = FALSE)
+
+#Identify and fix data issues, if any
+
+##Check for duplicate rows
+cat ('Duplicate Rows in Data ->',(nrow(uberData)-nrow(uberData %>% unique)))
+# Zero Duplicate rows
+
+## Check Blank or NA Values
+
+##checking for any NA values in all columns
+anyNA(uberData$Request.id)       
+anyNA(uberData$Pickup.point)     
+anyNA(uberData$Status)           
+anyNA(uberData$Request.timestamp)
+## Request id, pickup point, status, timestamp do not have NA values
+anyNA(uberData$Driver.id) 
+unique(subset(uberData$Status,is.na(uberData$Driver.id)))
+## Has only No Cars Available where driver id is NA
+anyNA(uberData$Drop.timestamp)   
+unique(subset(uberData$Status,is.na(uberData$Drop.timestamp)))
+## Has only Cancelled & No Cars Available where timestamp is NA
+## NA values in Driver ID and Drop Timestamp, can be ignored based on the Status
+
+## Check the values for any spelling errors
+
+unique(uberData$Pickup.point) #Airport and City are the only 2 values
+unique(uberData$Status) #Trip Completed, Cancelled and No Cars Available are the only 3 values
+
+##Check date formats
+class(uberData$Request.timestamp)
+class(uberData$Drop.timestamp)
+#Date is in Character format, needs to be converted into POSIXct/POSIXt format
+#Reference https://cran.r-project.org/web/packages/lubridate/vignettes/lubridate.html
+
+uberData$cabRequestedDateTime <- lubridate::parse_date_time(uberData$Request.timestamp,orders = c("d/m/Y H:M","d-m-Y H-M-S"))
+class(uberData$cabRequestedDateTime)
+uberData$droppedDateTime <- lubridate::parse_date_time(uberData$Drop.timestamp,orders = c("d/m/Y H:M","d-m-Y H-M-S"))
+class(uberData$droppedDateTime)
+#Converted into "POSIXct" "POSIXt" 
+
+#Convert into Numeric
+uberData$tripDuration <- as.numeric(difftime(uberData$droppedDateTime,uberData$cabRequestedDateTime,tz=Sys.timezone(),units="mins"))
+class(uberData$tripDuration)
+
+mean(uberData$tripDuration,na.rm = TRUE)
+min(uberData$tripDuration,na.rm = TRUE)
+max(uberData$tripDuration,na.rm = TRUE)
+#Average Trip Duration is 52.4 mins, Minimum trip duration is 21 mins and maximum trip duration is 83 mins
+#Getting Week day of the Cab Request
+uberData$cabRequestedMonth <- wday(uberData$cabRequestedDateTime, label = TRUE)
+
+
+# Get Time in time format
+
+uberData$cabRequestedTime <- chron(times=format(uberData$cabRequestedDateTime,"%H:%M:%S"))
+uberData$droppedTime <-chron(times=format(uberData$droppedDateTime,"%H:%M:%S"))
+
+#Get Hour from Time Format in Numeric Format
+
+uberData$cabRequestedHour<- as.numeric(format(uberData$cabRequestedDateTime,"%H"))
+class(uberData$cabRequestedHour)
+uberData$droppedHour<- as.numeric(format(uberData$droppedDateTime, "%H"))
+class(uberData$droppedHour)
+
+#Get only Date from Date&Time Format
+
+uberData$cabRequestedDate<- format(uberData$cabRequestedDateTime,"%m/%d/%Y")
+uberData$droppedDate<- format(uberData$droppedDateTime, "%m/%d/%Y")
+
+uberData <- uberData %>% BBmisc::dropNamed("Request.timestamp")
+uberData <- uberData %>% BBmisc::dropNamed("Drop.timestamp")
+
+#Business problem is to check cab Demand Vs Supply between 4AM and Midnight (12AM additional 1 hour of grace period added)
+#that would be 20 Intevals of 60 mins each. 
+#As the mean time for each trip takes 52.4 mins, a Cab driver has to start at atleast 3AM to reach airport by 4AM. 
+#Considering this, Starting Timeslot is 3AM and Ending Timeslot is 01AM, 22 Time Intervals
+
+#Categorizing the time After 1 AM Mightnight & before 3AM as NoT_IN_SCOPE_SLOT
+#following categorization is used
+
+#EarlyMorning <-> 3-4
+#EarlyMorning <-> 4-5
+#EarlyMorning <-> 5-6
+#EarlyMorning <-> 6-7
+#Morning <-> 7-8
+#Morning <-> 8-9
+#Morning <-> 9-10
+#Morning <-> 10-11
+#Morning <-> 11-12
+#Afternoon <-> 12-1
+#Afternoon <-> 1-2
+#Afternoon <-> 2-3
+#Afternoon <-> 3-4
+#Evening <-> 4-5
+#Evening <-> 5-6
+#Evening <-> 6-7
+#Evening <-> 7-8
+#Night <-> 8-9
+#Night <-> 9-10
+#Night <-> 10-11
+#Night <-> 11-12
+#Night <-> 12-1
+#NoT_IN_SCOPE_SLOT <-> 1-2
+#NoT_IN_SCOPE_SLOT <-> 2-3
+class(uberData$cabRequestedHour)
+
+
+#uberData <- uberData %>% BBmisc::dropNamed("Categorization")
+rowIncr <- 2
+for (rowIncr in 1:nrow(uberData)) 
+{
+  uberRowIncr <- uberData[rowIncr, ]
+  if (uberRowIncr$cabRequestedTime > "01:00:00" & uberRowIncr$cabRequestedTime < "03:00:00") {
+  uberData[rowIncr,"Categorization" ]<- "NotInScope_SLOT"
+} else if (uberRowIncr$cabRequestedTime > "03:00:00" & uberRowIncr$cabRequestedTime < "07:00:00") {
+  uberData[rowIncr,"Categorization" ]<- "EarlyMorning"
+} else if (uberRowIncr$cabRequestedTime >= "07:00:00" & uberRowIncr$cabRequestedTime < "12:00:00") {
+  uberData[rowIncr,"Categorization" ]<- "Morning"
+} else if (uberRowIncr$cabRequestedTime >= "12:00:00" & uberRowIncr$cabRequestedTime < "16:00:00") {
+  uberData[rowIncr,"Categorization" ]<- "Afternoon"
+} else if (uberRowIncr$cabRequestedTime >= "16:00:00" & uberRowIncr$cabRequestedTime < "20:00:00") {
+  uberData[rowIncr,"Categorization" ]<- "Evening"
+} else if (uberRowIncr$cabRequestedTime >= "20:00:00" & uberRowIncr$cabRequestedTime <= "23:59:59") {
+  uberData[rowIncr,"Categorization" ]<- "Night"
+} else if (uberRowIncr$cabRequestedTime >= "00:00:00" & uberRowIncr$cabRequestedTime <= "00:59:59" ) {
+  uberData[rowIncr,"Categorization" ]<- "Night"
+} else {
+  uberData[rowIncr,"Categorization" ]<- "NotInScope_SLOT"
+}
+
+
+}  
+#End For Loop
+
+## Data cleanup and preparation complete
+
+##Results Expected
+
+##1. Visually identify the most pressing problems for Uber. 
+
+#problematic requests where Status is either Cancelled or show No Cards
+
+problemRequests <- subset(uberData, uberData$Status != "Trip Completed")
+cols <- unique(problemRequests$Categorization)
+
+#countproblemRequests <- table(uberData$Pickup.point,uberData$Categorization)
+
+#barplot(countproblemRequests,
+#        Col = cols,
+#        main = "Unfulfilled Requests",
+#        xlab = "Time Slot",
+#        yLab = "Count",
+#        Las = 1,
+#        legend.text = TRUE,
+#        names = cols )
+
+#Chart shows Cancellations and No Cabs between Airpot and City by Category
+#Reference https://www.tutorialgateway.org/stacked-barplot-in-r/ & http://t-redactyl.io/blog/2016/01/creating-plots-in-r-using-ggplot2-part-4-stacked-bar-plots.html
+#Main reference https://rstudio-pubs-static.s3.amazonaws.com/329677_8f579b9e46284caeb9d3a72b7fdb7ac3.html
+#Plot by Pickup Point and Time Slot for No cars and Categorization in Percentages
+ggplot(problemRequests,aes(x=factor(Categorization),fill=factor(Pickup.point)))+
+  geom_bar(position="fill")+
+  geom_text(aes(label=scales::percent(..count../sum(..count..))),
+            stat='count',position=position_fill(vjust=0.5))
+
+#Plot by Pickup Point and Time Slot for No cars and Categorization in Numbers
+ggplot(problemRequests,aes(x=factor(Categorization),fill=factor(Pickup.point)))+
+  geom_bar(position="fill")+
+  geom_text(aes(label=scales::number(..count..)),
+            stat='count',position=position_fill(vjust=0.5))
+
+# Cancellations and No Cars
+#Early Morning - 15.2% from City & 2.1% from Airport
+#Morning - 22.4% from City & 1.7% from Airport
+#Afternoon - 4.1% from City & 2.3% from Airport
+#Evening - 3.2% from City & 22.1% from Airport
+#Night - 4.7% from City & 19.3% from Airport
+#1AM to 3PM - 1.7% from City & 1.4% from Airport  
+#Pain areas seem to be 
+# - From City (Morning (875 misses) and Early Morning(593 misses))
+# - From Airport (Evening(864 misses) and Night(755 misses))
+
+
+
+#2. Find out the gap between supply and demand 
+#Find the time slots when the highest gap exists
+#Find the types of requests (city-airport or airport-city) for which the gap is the most severe in the identified time slots
+
+uberData$rowCount <- 1
+demand <- uberData %>% 
+            group_by(Pickup.point,Categorization) %>%
+              summarize(cabDemand = sum(rowCount))
+
+
+supplyData <- subset(uberData,uberData$Status == "Trip Completed")
+
+supply <- supplyData %>% 
+            group_by(Pickup.point,Categorization) %>%
+               summarize(cabSupply = sum(rowCount))
+
+demandSupply <- merge(demand,supply,by.x=c("Pickup.point", "Categorization"), by.y=c("Pickup.point", "Categorization"))
+demandSupply$Gap <- with(demandSupply, demandSupply$cabDemand - demandSupply$cabSupply)
+demandSupply$orderFulfillment <-  with(demandSupply, 100 * (1-(demandSupply$Gap/demandSupply$cabDemand)))
+SorteddemandSupply <- demandSupply[order(demandSupply$orderFulfillment) , ]
+
+
+airportDS <- subset(SorteddemandSupply,SorteddemandSupply$Pickup.point == "Airport")
+cityDS <- subset(SorteddemandSupply,SorteddemandSupply$Pickup.point == "City")
+
+ggplot(uberData,aes(x=cabRequestedHour,fill=factor(Status)))+geom_bar()+facet_wrap(~Pickup.point)
+#Airport plots
+ggplot(airportDS, aes(x=Categorization, Gap)) + geom_bar(fill="#FF6666", position = 'dodge', stat='identity') + geom_text(aes(label=Gap), position=position_dodge(width=0.9), vjust=-0.25)
+#City plots
+ggplot(cityDS, aes(x=Categorization, Gap)) + geom_bar(fill="#FF6666", position = 'dodge', stat='identity') + geom_text(aes(label=Gap), position=position_dodge(width=0.9), vjust=-0.25)
+
+#Find the time slots when the highest gap exists
+highestGapTimeSlot <- demandSupply %>% 
+  group_by(Categorization) %>%
+  summarize(Gap = sum(Gap))
+
+ggplot(highestGapTimeSlot, aes(x=Categorization, Gap)) + geom_bar(fill="#FF6666", position = 'dodge', stat='identity') + geom_text(aes(label=Gap), position=position_dodge(width=0.9), vjust=-0.25)
+
+## Evenings, Morning and Night Time Slots are the slots with highest gap.
+
+##Find the types of requests (city-airport or airport-city) for which the gap is the most severe in the identified time slots
+#Airport plots
+ggplot(airportDS, aes(x=Categorization, Gap)) + geom_bar(fill="#FF6666", position = 'dodge', stat='identity') + geom_text(aes(label=Gap), position=position_dodge(width=0.9), vjust=-0.25)
+#Evenings and Night Timeslots from Airport to City have most gap 
+#City plots
+ggplot(cityDS, aes(x=Categorization, Gap)) + geom_bar(fill="#FF6666", position = 'dodge', stat='identity') + geom_text(aes(label=Gap), position=position_dodge(width=0.9), vjust=-0.25)
+#Early Morning and Morning Timeslots from City to Airport have most gap 
+
+##3.What do you think is the reason for this issue for the supply-demand gap? Write the answer in less than 100 words. You may accompany the write-up with plot(s).
+
+
+#Order Fulfillment Metric
+#a) Pickup point Airport for Evening Time Slot has 24.2%
+#b) Pickup point Airport for NightTime Slot has 28.4%
+#c) Pickup Point City for Early Morning Time Slot has 29.4%
+#d) Pickup Point City for Morning Time Slot has 32.1%
+
+
+
+canCelledDrivers1 <- subset(uberData, (uberData$Pickup.point == "Airport" & uberData$Status == "Cancelled" & uberData$Categorization == "Night"))
+canCelledDrivers2 <- subset(uberData, (uberData$Pickup.point == "Airport" & uberData$Status == "Cancelled" & uberData$Categorization == "Evening"))
+canCelledDrivers3 <- subset(uberData, (uberData$Pickup.point == "City" & uberData$Status == "Cancelled" & uberData$Categorization == "EarlyMorning"))
+canCelledDrivers4 <- subset(uberData, (uberData$Pickup.point == "City" & uberData$Status == "Cancelled" & uberData$Categorization == "Morning"))
+
+
+
+canCelledDrivers <- Reduce(function(...) merge(..., all=TRUE), list(canCelledDrivers1, canCelledDrivers2, canCelledDrivers3,canCelledDrivers4))
+
+
+#Find cancelled Driver IDs list
+driverList <- canCelledDrivers %>% 
+  group_by(Driver.id) %>%
+  summarize(cancellations = sum(rowCount))
+mean(driverList$cancellations)
+
+
+
+ggplot(canCelledDrivers,aes(x=factor(Categorization),fill=factor(Pickup.point)))+
+  geom_bar(position="fill")+
+  geom_text(aes(label=scales::percent(..count../sum(..count..))),
+            stat='count',position=position_fill(vjust=0.5))
+
+#High Percentage of drivers have cancelled in Morning and Early Morning Slot - 88.3% of drivers 
+#934 Cancellations in Morning and Early Morning slots
+
+ggplot(canCelledDrivers,aes(x=factor(Categorization),fill=factor(Pickup.point)))+
+  geom_bar(position="fill")+
+  geom_text(aes(label=scales::number(..count..)),
+            stat='count',position=position_fill(vjust=0.5))
+
+subset(driverList, cancellations > 3)
+#290 drivers have cancelled with Average of 3.6 per driver 
+#Interview these drivers to exactly understand the reasons of cancellation. 
+#Obtain more data from DataWarehouse to analyze below reasons
+#Consider drivers with more than 3 cancellations
+#Around 140 drivers with more than 3 cancellations
+#. The reasons could be
+# a) End of Shift of the driver
+# b) Customer/inaccurate address selection
+# c) Idle time in Airport or City after drop
+# d) Traffic congestion in city
+
+#It is clear from the Order Fulfillment Metric Analysis that
+#Drivers do not prefer Morning time for Airport drops
+#probably because they can complete more City requests and due to low incoming air traffic 
+#their waiting time will be high 
+
+##4. Recommend some ways to resolve the supply-demand gap.
+
+#a) Provide more lucarative incentivies to drivers during peak time. Example :- Early Morning, Morning , Evening and Night
+#b) Reduce the number of mandatory trips to earn bonus to drivers covering peak time as Airport trips take longer time and more wait time.
+#This will encorage drivers to earn back the bonus inspite of Airport trips. Also factor in the Flight Status and updates to Drivers
+#c) Identify drivers who are in-disciplined and cancel for no reason. Take required HR action to address the issue
+#d) If a driver has to wait for more than 60 mins in airport, provide a part of Cost compensation (fuel cost) to encourage him to return to city to pickup other city trips

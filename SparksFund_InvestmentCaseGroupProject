@@ -1,0 +1,323 @@
+Assignment :- Spark Funds, an asset management company. Spark Funds wants to make investments in a few companies. 
+The CEO of Spark Funds wants to understand the global trends in investments so that she can take the investment decisions effectively.
+
+#RCode
+remove(list = ls())
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(writexl)
+install.packages("tibble")
+library(tibble)
+library(countrycode)
+
+#Checkpoint 1: Data Cleaning 1
+#    Load the companies and rounds data (provided on the previous page) into two data frames and name them 
+#    companies and rounds2 respectively.
+
+#Setup the working directory
+setwd("C:/Masters/PGDDS/Sparks Case Study")
+#Verify the working directory is setup correctly
+getwd()
+
+#Import companies.txt into companies dataframe
+# file.choose() lets us choose file during runtime
+#companies <- read.table(file.choose(),header = TRUE, sep = "\t", quote = "\"", comment.char = "", fill=TRUE)
+
+companies <- read.table('companies.txt',header = TRUE, sep = "\t", quote = "\"", comment.char = "", fill=TRUE)
+
+#Import rounds2.csv into rounds2 dataframe
+rounds2 <- read.csv("rounds2.csv", stringsAsFactors = FALSE)
+
+#Import mapping.csv into mapping dataframe
+
+mapping <- read.csv("mapping.csv", header =  TRUE, stringsAsFactors = FALSE)
+
+
+#Import English Speaking Country list and gettting their country codes
+englishSpeakingCountries <- read.csv("English_Countries.csv", header =  TRUE, stringsAsFactors = FALSE)
+englishSpeakingCountries$CountryCode <- countrycode(englishSpeakingCountries$Country, 'country.name', 'iso3c')
+
+
+
+#rounds2.company_permalink & companies.permalink are in proper, upper and lower case. these need to be converted 
+#into similar format to be able to link, merge etc
+
+companies$permalink <- tolower(companies$permalink)
+rounds2$company_permalink <- tolower(rounds2$company_permalink)
+
+#Results of  Table 1.1: Understand the Data Set 
+
+'How many unique companies are present in rounds2?'
+length(unique(rounds2$company_permalink))
+
+#Answer 66368
+
+'How many unique companies are present in rounds2?'
+length(unique(companies$permalink))
+#Answer 66368
+
+#Are there any companies in the rounds2 file which are not present in companies? Answer yes or no: Y/N
+#Rows that appear in rounds2 but not companies.
+
+dplyr::setdiff(rounds2$company_permalink, companies$permalink)
+
+#Answer -> 0
+
+
+#Merge the two data frames so that all variables (columns) in the companies frame are added to the rounds2 data frame. 
+#Name the merged frame master_frame. How many observations are present in master_frame?
+
+
+master_frame <- merge(rounds2, companies, by.x=c("company_permalink"), by.y=c("permalink"))
+
+#Get English Speaking column added from englishSpeakingCountries
+mfdf <- merge(master_frame, englishSpeakingCountries, by.x=c("country_code"), by.y=c("CountryCode"))
+
+
+#export master_frame to excel
+
+temporaryfile <- write_xlsx(master_frame)
+#19990 rows where raised_amount_usd is blank
+
+#------------End of Checkpoint 1-------------------------------------------------
+
+
+#Checkpoint 2: Funding Type Analysis
+
+#mfdf for English speaking countries, Master_frame for all countries
+aggregate(mfdf$raised_amount_usd, by=list(FRT=mfdf$funding_round_type),mean, na.rm=TRUE)  
+aggregate(master_frame$raised_amount_usd, by=list(FRT=master_frame$funding_round_type),mean, na.rm=TRUE)  
+
+
+#replace NA values with 0
+
+master_frame$raised_amount_usd[is.na(master_frame$raised_amount_usd)] <- 0
+mfdf$raised_amount_usd[is.na(mfdf$raised_amount_usd)] <- 0
+
+
+# Group by Fund type, and calculate mean(raised_amount_type) 
+
+master_fund_gp <- group_by(master_frame, funding_round_type)
+fund_invested <- summarise(master_fund_gp, mean(raised_amount_usd))
+colnames(fund_invested) <- c("funding_type", "average_raised_amt")
+
+mfdf_gp <- group_by(mfdf, funding_round_type)
+fund_invested_Eng <- summarise(mfdf_gp, mean(raised_amount_usd))
+colnames(fund_invested_Eng) <- c("funding_type", "average_raised_amt")
+
+
+#Considering that Spark Funds wants to invest between 5 to 15 million USD per 
+#investment round, which investment type is the most suitable for them?
+
+suitable_investment <- fund_invested[which(fund_invested$average_raised_amt > 5000000 & fund_invested$average_raised_amt < 15000000),]
+suitable_investment_Eng <- fund_invested_Eng[which(fund_invested_Eng$average_raised_amt > 5000000 & fund_invested_Eng$average_raised_amt < 15000000),]
+
+#dplyr::
+suitable_investment %>% group_by("average_raised_amt") %>% slice(which.max(average_raised_amt))
+suitable_investment_Eng %>% group_by("average_raised_amt") %>% slice(which.max(average_raised_amt))
+
+#Venture is the funding type with 10634054 average raised amount
+
+
+#------------End of Checkpoint 2-------------------------------------------------
+
+## Checkpoint 3: Country Analysis
+
+#Spark Funds wants to see the top nine countries which have received the highest 
+#total funding (across ALL sectors for the chosen investment type)
+
+#Group by country, and calculate mean(raised_amount_type) for Venture funding type
+# chosen type is Venture funding type.
+
+
+country_gp <- filter(group_by(master_frame, country_code), funding_round_type == "venture", country_code != "")
+country_gp <- country_gp %>% drop_na(country_code)
+top9 <- summarise(country_gp, sum(raised_amount_usd))
+colnames(top9) <- c("Country_Code","Total_Sum")
+top9 <- head(arrange(top9, desc(Total_Sum)),9)
+
+#USA, GBR and IND -> English Speaking Countries. China is not an english speaking country
+
+#------------End of Checkpoint 3-------------------------------------------------
+
+
+## Checkpoint 4: Sector Analysis 1
+
+#Extract the primary sector of each category list from the category_list column
+
+primary_sector <- str_split(master_frame$category_list, pattern="\\|")
+primary_sector <- sapply(primary_sector, function(x) x[1][1])
+master_frame[,"primary_sector"] <- primary_sector
+#Replace blanks with Blanks
+master_frame$primary_sector[which(master_frame$primary_sector == "")] <- "Blanks"
+
+
+# Use the mapping file mapping.csv to map each primary sector to one of the eight 
+# main sectors (Note that Others is also considered one of the main sectors)
+
+#Extract the primary sector of each category list from the category_list column
+
+
+tempfile <- write_xlsx(master_frame)
+
+
+#Add Main Sector as a column and populate with MainSector
+
+install.packages("tibble")
+library(tibble)
+
+mapping <- read.csv("mapping.csv", header =  TRUE, stringsAsFactors = FALSE)
+mapWMainSec <- add_column(mapping,Main_Sector="",.before = 1)
+nRowsM <- nrow(mapWMainSec)
+nColM <- ncol(mapWMainSec)
+for(i in 1:nRowsM){
+  for(j in 3:nColM){     
+    
+    if (mapWMainSec[i,j] == 1) { 
+      mapWMainSec[i,1] <- colnames(mapWMainSec[j]) }   
+    
+  }}
+
+#replace 0 with na in category_list
+
+mapWMainSec$category_list <- gsub("0", "na",mapWMainSec$category_list)
+
+#convert primary key in both dataframe to lower case
+mapWMainSec$category_list <- tolower(mapWMainSec$category_list)
+master_frame$primary_sector <- tolower (master_frame$primary_sector)
+
+#create new mapping file and change category list blanks to NO VALUE
+newMapping <- mapWMainSec[,c(1,2)]
+newMapping$category_list[which(newMapping$category_list == "")] <- "No Value"
+
+#Expected Results: Code for a merged data frame with each primary sector mapped to 
+#its main sector (the primary sector should be present in a separate column).
+
+final_mf <- merge(master_frame, newMapping, by.x=c("primary_sector"), by.y=c("category_list"), all.x=TRUE)
+
+
+
+#------------End of Checkpoint 4-------------------------------------------------
+
+
+## Checkpoint 5: Sector Analysis 2
+
+
+#you have a data frame with each company's main sector (main_sector) mapped to it.
+#Answer final_mf dataframe
+
+#top three English speaking countries and the most suitable funding type for Spark Funds.
+#Answer USA, GBR and INDIA
+
+#the range of funding preferred by Spark Funds is 5 to 15 million USD.
+#Answer Venture
+
+tempfile <- write_xlsx(final_mf)
+
+#Create three separate data frames D1, D2 and D3 for each of the three countries containing the 
+#observations of funding type FT falling within the 5-15 million USD range. 
+#The three data frames should contain:
+#All the columns of the master_frame along with the primary sector and the main sector
+#The total number (or count) of investments for each main sector in a separate column
+#The total amount invested in each main sector in a separate column
+
+
+D1_Ind <- filter(final_mf, final_mf$country_code == "IND", funding_round_type == "venture", raised_amount_usd >= 5000000,raised_amount_usd <= 15000000 )
+D2_USA <- filter(final_mf, country_code == "USA", funding_round_type == "venture", raised_amount_usd >= 5000000,raised_amount_usd <= 15000000 )
+D3_GBR <- filter(final_mf, country_code == "GBR", funding_round_type == "venture", funding_round_type == "venture", raised_amount_usd >= 5000000,raised_amount_usd <= 15000000 )
+
+#create data frames with groupings on main sector
+
+
+D1_india_invest_grp <- group_by(D1_Ind, Main_Sector)
+D2_usa_invest_grp <- group_by(D2_USA, Main_Sector)
+D3_gbr_invest_grp <- group_by(D3_GBR, Main_Sector)
+
+
+# Summarises the main sectors with Avg raised amount, number of investments
+# Also selects the main sectors where investments are between 5 and 15 million
+avg_raised_amt <- function(p)
+{
+  country_main_sector <- summarise(p, mean(raised_amount_usd), n())
+  colnames(country_main_sector) <- c("main_sector","avg_raised_amt_usd","no. of investments")
+  country_main_sector <- subset(country_main_sector, avg_raised_amt_usd >= 5000000 & avg_raised_amt_usd <= 15000000)
+  return(country_main_sector)
+}
+
+# calling the avg_raised_amt function 
+india_main_sector <- avg_raised_amt(D1_india_invest_grp)
+usa_main_sector <- avg_raised_amt(D2_usa_invest_grp)
+gbr_main_sector <- avg_raised_amt(D3_gbr_invest_grp)
+
+#Total number of Investments (count) Q 1
+sum(india_main_sector$`no. of investments`)
+sum(usa_main_sector$`no. of investments`)
+sum(gbr_main_sector$`no. of investments`)
+
+#Total amount of investment (USD) Q2
+
+sum(D1_india_invest_grp$raised_amount_usd)
+sum(D2_usa_invest_grp$raised_amount_usd)
+sum(D3_gbr_invest_grp$raised_amount_usd)
+
+#Number of investments in top three sectors Q3:Q8
+india_main_sector <- arrange(india_main_sector, desc(`no. of investments`))
+usa_main_sector <- arrange(usa_main_sector, desc(`no. of investments`))
+gbr_main_sector <- arrange(gbr_main_sector, desc(`no. of investments`))
+
+#For point 3 (top sector count-wise), which company received the highest investment?
+
+
+#Top 1st and 2nd companies in USA, GBR and IND
+
+USA_Top_1_Company_wise <- subset(D2_usa_invest_grp,D2_usa_invest_grp$Main_Sector=="Others") %>%
+  group_by(company_permalink) %>%
+  summarise(total=sum(raised_amount_usd))%>%
+  arrange(desc(total))
+
+
+GBR_Top_1_Company_wise <- subset(D3_gbr_invest_grp,D3_gbr_invest_grp$Main_Sector=="Others") %>%
+  group_by(company_permalink) %>%
+  summarise(total=sum(raised_amount_usd))%>%
+  arrange(desc(total))
+
+IND_Top_1_Company_wise <- subset(D1_india_invest_grp,D1_india_invest_grp$Main_Sector=="Others") %>%
+  group_by(company_permalink) %>%
+  summarise(total=sum(raised_amount_usd))%>%
+  arrange(desc(total))
+
+
+#------------End of Checkpoint 5-------------------------------------------------
+
+## Checkpoint 6
+
+
+
+
+#A plot showing the fraction of total investments (globally) in venture, seed, and private equity, 
+#and the average amount of investment in each funding type. This chart should make it clear that a certain 
+#funding type (FT) is best suited for Spark Funds.
+#Export final_mf dataframe and charts are in tableau
+
+write.csv(final_mf, "C:/Masters/PGDDS/Sparks Case Study/tableauInput.csv", row.names=F)
+
+#A plot showing the top 9 countries against the total amount of investments of funding type FT. 
+#This should make the top 3 countries (Country 1, Country 2, and Country 3) very clear.
+
+top9English <- merge(top9, englishSpeakingCountries, by.x=c("Country_Code"), by.y=c("CountryCode"), all.x=TRUE)
+#top9English <- filter(top9English, top9English$English_Speaking == "English")
+top9English <- top9English[order(top9English$Total_Sum, decreasing = TRUE),]
+write.csv(top9, "C:/Masters/PGDDS/Sparks Case Study/tableauInputTop9.csv", row.names=F)
+
+
+#A plot showing the number of investments in the top 3 sectors of the top 3 countries on one chart 
+#(for the chosen investment type FT). 
+
+india_main_sector <- cbind(india_main_sector,"Country" = "IND")
+usa_main_sector <- cbind(usa_main_sector,"Country" = "USA")
+gbr_main_sector <- cbind(gbr_main_sector,"Country" = "GBR")
+
+Top3SecTop3Coun <- rbind(head(india_main_sector,3),head(usa_main_sector,3),head(gbr_main_sector,3))
+
+write.csv(Top3SecTop3Coun, "C:/Masters/PGDDS/Sparks Case Study/tableauInputTop3SecTop3Coun.csv", row.names=F)

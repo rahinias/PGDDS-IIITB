@@ -1,0 +1,106 @@
+-- Task 1 Understanding the data in hand
+#Answers as comments below
+-- -- cust_dimen-> Table contains Customer name, location & segment. Cust_id is the Primary key for each Customer
+-- -- orders_dimen-> Table contains the Order date, priority. Ord_id is the primary key while Order_ID is a foreign key
+-- -- prod_dimen-> Table acts like a Product categorization with Prod_id being the Primary Key
+-- -- shipping_dimen-> Table contains the shipping record with mode of shippinig for each order_id. Ship_id is the primary key while Order_Id is a foreign key
+-- -- market_fact-> Table contains 4 foreign keys namely Ord_id, Prod_id, Ship_id and Cust_id. The Table holds details for each Order, Customer, Product and Shipping ID combination details of Sales, Discount, Order Quantity, Profit made (negative indicates loss), Cost of shipping and Product Base margin. This table does not contain any primary key. Product Base Margin has 63 records with ‘NA’ as value. Converted these to ‘0’ to be able to import all rows. The combination of the 4 foreign keys also is not unique for 62 combinations, as this table also contains 'returns or losses' in Profit column indicating Negative number.
+
+-- Task 2: Basic Analysis
+-- -- A) Find the total and the average sales (display total_sales and avg_sales)
+select sum(Sales) as total_sales, avg(Sales) as avg_sales from market_fact;
+
+-- -- B) Display the number of customers in each region in decreasing order of no_of_customers. The result should contain columns Region, no_of_customers
+
+Select Region, count(Cust_id) as no_of_customers from cust_dimen
+group by Region
+Order by no_of_customers desc;
+
+
+-- -- C) Find the region having maximum customers (display the region name and max(no_of_customers)
+
+Select Region, count(Cust_id) as max_no_of_customers from cust_dimen
+group by Region
+Order by max_no_of_customers desc
+limit 0,1;
+
+-- -- D) Find the number and id of products sold in decreasing order of products sold (display product id, no_of_products sold)
+
+Select prod_id as product_id, count(Order_Quantity) as no_of_products_sold from market_fact
+group by product_id
+order by no_of_products_sold desc;
+
+
+-- -- E) Find all the customers from Atlantic region who have ever purchased ‘TABLES’ and the number of tables purchased (display the customer name, no_of_tables purchased) 
+
+select cd.Customer_Name,sum(mf.Order_Quantity) as number_of_tables_purchased
+from market_fact mf , cust_dimen cd, prod_dimen pd
+where mf.Prod_id = pd. Prod_id
+and mf.Cust_id = cd. Cust_id
+and pd.Product_Sub_Category= "Tables"
+and cd.Region= "Atlantic"
+group by cd.Customer_Name
+order by number_of_tables_purchased; 
+
+--or
+
+Select cd.Customer_Name, sum(mf.Order_Quantity) as no_of_tables_purchased from market_fact mf, cust_dimen cd
+where mf.Cust_id = cd.Cust_id 
+and mf.Prod_id = (select Prod_id from prod_dimen where Product_Sub_Category = 'TABLES')
+and cd.Region = 'Atlantic'
+Group by cd.Customer_Name
+order by no_of_tables_purchased;
+
+-- or
+
+Select cd.Customer_Name, sum(mf.Order_Quantity) as no_of_tables_purchased from market_fact mf, cust_dimen cd
+where mf.Cust_id = cd.Cust_id 
+and mf.Prod_id = 'Prod_11' -- Prod 11 is product id of Product Sub Category 'Tables'
+and cd.Region = 'Atlantic'
+Group by cd.Customer_Name
+order by no_of_tables_purchased;
+
+
+
+-- -- Task 3: Advanced Analysis
+-- Display the product categories in descending order of profits (display the product category wise profits i.e. product_category, profits)?
+
+Select pd.Product_Category, Sum(mf.profit) as Profits from market_fact mf, prod_dimen pd
+where mf.Prod_id = pd.Prod_id
+group by pd.Product_Category
+order by Profits desc;
+
+
+-- B)Display the product category, product sub-category and the profit within each subcategory in three columns. 
+
+Select pd.Product_Category, pd.Product_Sub_Category, Sum(mf.profit) as Profits from market_fact mf, prod_dimen pd
+where mf.Prod_id = pd.Prod_id
+group by pd.Product_Category, pd.Product_Sub_Category
+order by Profits;
+-- TABLES is the least Profitable Product Sub Category with -99062 Profit with Product Code = 'Prod_11'
+
+
+-- C) . Where is the least profitable product subcategory shipped the most? For the least
+      # profitable product sub-category, display the region-wise no_of_shipments and the
+      # profit made in each region in decreasing order of profits (i.e. region,
+      # no_of_shipments, profit_in_each_region)
+      #  o Note: You can hardcode the name of the least profitable product subcategory
+
+-- TABLES is the least Profitable Product Sub Category with -99062 Profit with Product Code = 'Prod_11'
+
+Select cd.Region, count(mf.Ship_id) as no_of_shipments, sum(mf.Profit) as Profits from market_fact mf, cust_dimen cd
+where mf.Cust_id =  cd.Cust_id
+and mf.Prod_id = 'Prod_11'
+group by cd.region
+order by Profits desc;
+
+#or
+
+Select cd.Region, count(mf.Ship_id) as no_of_shipments, sum(mf.Profit) as Profits from market_fact mf, cust_dimen cd, prod_dimen pd 
+where mf.Cust_id =  cd.Cust_id
+and mf.Prod_id = pd.Prod_id
+and pd.Product_Sub_Category = 'TABLES'
+group by cd.region
+order by Profits desc;
+
+	

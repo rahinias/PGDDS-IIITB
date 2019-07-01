@@ -1,2 +1,2 @@
 # PGDDS-IIITB
-PGDDS-IIITB Course Assignments
+Post Graduate Diploma in Data Science from Indian Institute of Information Technology, Bangalore

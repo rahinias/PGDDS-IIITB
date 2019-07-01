@@ -1,0 +1,298 @@
+Assignment 
+You work for a consumer finance company which specialises in lending various types of loans to urban customers. 
+When the company receives a loan application, the company has to make a decision for loan approval based on the applicant’s profile. 
+Two types of risks are associated with the bank’s decision:
+
+If the applicant is likely to repay the loan, then not approving the loan results in a loss of business to the company
+
+If the applicant is not likely to repay the loan, i.e. he/she is likely to default, then approving the loan may lead to a 
+financial loss for the company
+
+ The data given contains the information about past loan applicants and whether they ‘defaulted’ or not. 
+ The aim is to identify patterns which indicate if a person is likely to default, which may be used for taking actions such as 
+ enying the loan, reducing the amount of loan, lending (to risky applicants) at a higher interest rate, etc.
+
+ In this case study, you will use EDA to understand how consumer attributes and loan attributes influence the tendency of default.
+ 
+ ############# Gramener Case Study - R Code 
+installPackages = c('mapproj','stringr','DescTools','lubridate','tidyverse','fiftystater','formattable','usmap','maps','ggplot2','dplyr')
+
+#Installing the packages if not already installed
+for(pckg in installPackages){
+  if(!require(pckg,character.only = TRUE)){
+    install.packages(pckg)
+  }
+  library(pckg, character.only = TRUE)
+}
+library(data.table)
+
+loan <- read.csv("loan.csv", header = TRUE, stringsAsFactors = FALSE)  
+
+#Observe the structure of loan data
+summary(loan)
+
+#54 have NAs and can be removed from Basedata
+#tot_hi_cred_lim,            total_bal_ex_mort,         total_bc_limit,   total_il_high_credit_limit,            mo_sin_old_il_acct,                 mo_sin_old_rev_tl_op, mo_sin_rcnt_rev_tl_op,               mo_sin_rcnt_tl,                mort_acc,                 mths_since_recent_bc, mths_since_recent_bc_dlq,        mths_since_recent_inq,                 mths_since_recent_revol_delinq,             num_accts_ever_120_pd,            num_actv_bc_tl,                 num_actv_rev_tl,            num_bc_sats,    num_bc_tl,         num_il_tl,            num_op_rev_tl,                 num_rev_accts,                num_rev_tl_bal_gt_0,   num_sats,           num_tl_120dpd_2m,      num_tl_30dpd,                 num_tl_90g_dpd_24m, num_tl_op_past_12m, pct_tl_nvr_dlq, percent_bc_gt_75,          tot_coll_amt,                 tot_cur_bal,       open_acc_6m, open_il_6m,       open_il_12m,    open_il_24m,    mths_since_rcnt_il,                 total_bal_il,        il_util,   open_rv_12m, open_rv_24m, max_bal_bc,      all_util, total_rev_hi_lim,                 inq_fi,   total_cu_tl,         inq_last_12m,    acc_open_past_24mths,               avg_cur_bal,      bc_open_to_buy,                 bc_util, annual_inc_joint,             dti_joint,              verification_status_joint,                 mths_since_last_major_derog
+
+loan<-loan[,-which(apply(loan,2,function(x)all(is.na(x))))]
+str(loan)
+
+#11 columns identified with same data which are identified to be not of value 
+#pymnt_plan,    url,         zip_code,             initial_list_status,             collections_12_mths_ex_med, policy_code,                 application_type,             acc_now_delinq,              chargeoff_within_12_mths,        delinq_amnt,     tax_liens
+
+delCol <- c('pymnt_plan',              'url',       'zip_code',           'initial_list_status',           'collections_12_mths_ex_med',                 'policy_code',     'application_type',           'acc_now_delinq',            'chargeoff_within_12_mths',                 'delinq_amnt',   'tax_liens')
+loan <- select(loan, -delCol)
+
+#Induce a new numerical column for Histogram
+
+loan$Histogram <- 1
+
+#find if loan id and member id is distinct or continuous data
+loan[which(duplicated(loan$id)),]
+loan[which(duplicated(loan$member_id)),]
+#Data is Unique - Distinct and not continuous
+
+############## Data Cleaning & conversion
+
+loan$issue_d <- as.Date(loan$issue_d,"%b-%d")
+loan$last_pymnt_d <- as.Date(loan$last_pymnt_d, "%b-%d")
+loan$earliest_cr_line <- as.Date(loan$earliest_cr_line, "%b-%d")
+loan$last_credit_pull_d <- as.Date(loan$last_credit_pull_d, "%b-%d")
+loan$revol_util <-  as.numeric(substr(loan$revol_util,0,nchar(loan$revol_util)-1))
+loan$int_rate <-  as.numeric(substr(loan$int_rate,0,nchar(loan$int_rate)-1))
+loan$dti <-  as.numeric(substr(loan$dti,0,nchar(loan$dti)-1))
+loan$int_rate<-  as.numeric(substr(loan$int_rate,0,nchar(loan$int_rate)-1))
+
+#identify columns with data for Categorization
+unique(loan$term) #only 2 values 36 months and 60 months, no need to categorize
+unique(loan$int_rate) # values ranging from 5.42 to 24.59, can be categorized by an interval of 5
+unique(loan$installment) #grouping not needed
+unique(loan$grade) #grouping not needed as these are already grouped
+unique(loan$home_ownership) #grouping not needed as these are already grouped
+unique(loan$emp_length) #grouping not needed as these are already grouped
+summary(loan$annual_inc) #can be categorized based on income
+unique(loan$verification_status) #grouping not needed as these are already grouped
+unique(loan$loan_status) #grouping not needed as these are already grouped
+summary(loan$total_acc)#can be categorized 
+
+#Based on data dictionary, 2 Key columns identified
+#a.          Debt-to-income ratio (dti) - Lower the better
+#b. revolving balance also known as debt-to-limit ratio (revol_util), lower the better
+
+summary(loan$dti) #can be categorized
+#Looks like banks approve loans where dti is <30% as maximum value is 29.9%
+
+summary(loan$revol_util) #can be categorized
+#Revolving balance (debt-to-limit ratio) is not considered. This will be a key column for inferential statistica
+
+
+#Categorizing identified columns
+
+#Revolving balance (debt-to-limit ratio)
+loan[which(is.na(loan$revol_util)),'Group_util'] <- 'Not Available'
+loan[which(loan$revol_util<=30.00 ),'Group_util'] <- '<30%'
+loan[which(loan$revol_util>30.00 & loan$revol_util<50.00),'Group_util'] <- '31%-50%'
+loan[which(loan$revol_util>=31.00 & loan$revol_util<100.00),'Group_util'] <- '>50%'
+
+# Categorizing "int_rate" by grouping in bins
+loan[which(is.na(loan$int_rate)),'Group_int_rate'] <- 'Not Available'
+loan[which(loan$int_rate<5.00 ),'Group_int_rate']<-'<5%'
+loan[which(loan$int_rate> 5.00 & loan$int_rate <=10.00),'Group_int_rate']<-'6%-10%'
+loan[which(loan$int_rate> 10.00 & loan$int_rate <=15.00),'Group_int_rate']<-'11%-15%'
+loan[which(loan$int_rate> 15.00 & loan$int_rate <=20.00),'Group_int_rate']<-'16%-20%'
+loan[which(loan$int_rate> 20.00 & loan$int_rate <=25.00),'Group_int_rate']<-'21%-25%'
+loan[which(loan$int_rate> 25.00 ),'Group_int_rate']<-'>25%'
+
+
+# Categorizing "dti" by grouping in bins
+loan[which(is.na(loan$dti)),'Group_DTI'] <- 'Not Available'
+loan[which(loan$dti<5.00 ),'Group_DTI']<-'<5%'
+loan[which(loan$dti> 5.00 & loan$dti <=10.00),'Group_DTI']<-'6%-10%'
+loan[which(loan$dti> 10.00 & loan$dti <=15.00),'Group_DTI']<-'11%-15%'
+loan[which(loan$dti> 15.00 & loan$dti <=20.00),'Group_DTI']<-'16%-20%'
+loan[which(loan$dti> 20.00 & loan$dti <=25.00),'Group_DTI']<-'21%-25%'
+loan[which(loan$int_rate> 25.00 ),'Group_int_rate']<-'>25%'
+
+# Categorizing Annual Income by grouping in bins
+loan[which(is.na(loan$annual_inc)),'Group_annual_inc'] <- 'Not Available'
+loan[which(loan$annual_inc<50000.00 ),'Group_annual_inc']<-'<50K'
+loan[which(loan$annual_inc>= 50000.00 & loan$annual_inc <=100000.00),'Group_annual_inc']<-'50K-100K'
+loan[which(loan$annual_inc> 100000.00 & loan$annual_inc <1000000.00),'Group_annual_inc']<-'100K-1M'
+loan[which(loan$annual_inc> 1000000.00 ),'Group_annual_inc']<-'>1M'
+
+# Categorizing total_acc by grouping in bins 
+loan[which(is.na(loan$total_acc)),'Group_creditlines'] <- 'None'
+loan[which(loan$total_acc<=10 ),'Group_creditlines']<-'<=10'
+loan[which(loan$total_acc> 10 & loan$total_acc <=50),'Group_creditlines']<-'Between10-50'
+loan[which(loan$total_acc> 50 ),'Group_creditlines']<-'>50'
+
+#Check to see if groupings are rightly done
+unique(loan$Group_DTI) 
+unique(loan$Group_util)
+unique(loan$Group_int_rate)
+unique(loan$Group_annual_inc)
+
+#Checking data anomalies between title & purpose 
+
+loan %>% filter(str_detect(title, "Home"))
+loan %>% filter(str_detect(title, "Medical"))
+loan %>% filter(str_detect(title, "Student"))
+loan %>% filter(str_detect(title, "Education"))
+
+##Loan Purpose seems to be inaccurate. Based on Title search some of keywords categorization inaccuracies are found
+##Recommended not to use Purpose column for analysis as it seems inaccurately used
+
+
+#Data Analysis - Approach
+#Inferential Statistics to be applied on loan status Fully Paid & Charged Off - What went wrong
+#Predictive Analytics to be applied on loan status Charged Off - How to avoid
+
+loan$state <- loan$addr_state
+#Inferential
+predictiveloans <- loan[loan$loan_status=='Current',]
+inferenceloans <- loan[loan$loan_status != 'Current',]
+
+str(loan)
+
+loanByState <- loan %>% 
+  group_by(state,loan_status) %>%
+  summarize(LoanNum = sum(Histogram))
+
+
+write.csv(predictiveloans,'predictive.csv')
+write.csv(inferenceloans,'inference.csv')
+write.csv(loanByState,'loanbyState.csv')
+write.csv(loan,'loanOutput.csv')
+
+# Univariate Analysis####
+
+# Univariate on- Group_DTI
+
+ggplot(inferenceloans,aes(x=Group_DTI,fill=loan_status))+geom_bar(position = "stack")+scale_y_continuous(trans='log2') +geom_text( stat='count',aes(label=..count..),vjust=2)+ xlab("DTI group") + ylab("Count of Applicants Grouped in Uti") + ggtitle("Group DTI ")
+
+# Univariate on- Group UTI
+
+ggplot(inferenceloans,aes(x=Group_util,fill=loan_status))+geom_bar(position = "stack")+scale_y_continuous(trans='log2') +geom_text(stat='count',aes(label=..count..),vjust=2)+ xlab("Uti group") + ylab("Count of Applicants Grouped in Uti") + ggtitle("Group Uti ")
+
+# Univariate on- Group by Interest rate
+
+ggplot(inferenceloans,aes(x=Group_int_rate,fill=loan_status))+geom_bar(position = "stack")+scale_y_continuous(trans='log2') +geom_text(stat='count',aes(label=..count..),vjust=2)+ xlab("Interest Rate") + ylab("Count of Applicants Grouped by Interest Rates") + ggtitle("Interest Rate ")
+
+# Univariate on- Group by Interest rate
+
+ggplot(inferenceloans,aes(x=Group_annual_inc,fill=loan_status))+geom_bar(position = "stack")+scale_y_continuous(trans='log2') +geom_text(stat='count',aes(label=..count..),vjust=2)+ xlab("Annual Income") + ylab("Count by Annual Income") + ggtitle("Annual Income Group ")
+
+# Univariate on- Creit lines
+
+ggplot(inferenceloans,aes(x=Group_creditlines,fill=loan_status))+geom_bar(position = "stack")+scale_y_continuous(trans='log2') +geom_text(stat='count',aes(label=..count..),vjust=2)+ xlab("Credit Lines") + ylab("Count by Credit Lines") + ggtitle("Credit Lines ")
+
+# Univariate on- Employee length
+
+ggplot(inferenceloans,aes(x=emp_length,fill=loan_status))+geom_bar(position = "stack")+scale_y_continuous(trans='log2') +geom_text(stat='count',aes(label=..count..),vjust=2)+ xlab("Employee Tenure") + ylab("Count by Employee Tenure") + ggtitle("Group by Employee Tenure ")
+
+# Univariate on- Verification Status
+
+ggplot(inferenceloans,aes(x=verification_status,fill=loan_status))+geom_bar(position = "stack")+scale_y_continuous(trans='log2') +geom_text(stat='count',aes(label=..count..),vjust=2)+ xlab("Verification Status") + ylab("Count ") + ggtitle("Group by Verification Status ")
+
+# Univariate on- State
+
+ggplot(inferenceloans,aes(x=addr_state,fill=loan_status))+geom_bar(position = "stack")+scale_y_continuous(trans='log2') +geom_text(stat='count',aes(label=..count..),vjust=2)+ xlab("Group by State") + ylab("Count ") + ggtitle("Group by State ")
+
+# Univariate on-Delinq 2 years
+
+ggplot(inferenceloans,aes(x=delinq_2yrs,fill=loan_status))+geom_bar(position = "stack")+scale_y_continuous(trans='log2') +geom_text(stat='count',aes(label=..count..),vjust=2)+ xlab("Group by delinq_2yrs") + ylab("Count ") + ggtitle("Group by delinq_2yrs ")
+
+# Taking subset of "Charged off loans " and "Non charged off loans"
+
+charged_off<-subset(inferenceloans, inferenceloans$loan_status=='Charged Off')
+fullyPaidOff<-subset(inferenceloans, inferenceloans$loan_status!='Charged Off')
+
+
+## Bi- Variate Analysis##############
+
+# Bi-Variate on delinq 2 years and Group-DTI for "Charged off " Loans
+
+ggplot(charged_off,aes(x=factor(delinq_2yrs),fill=factor(Group_DTI)))+
+  geom_bar(position="fill")+
+  geom_text(aes(label=scales::number(..count..)),
+            stat='count',position=position_fill(vjust=0.5))
+
+# Grouping of Delinq 2 years and Group_DTI
+
+bi_deliq_dti <- charged_off %>% 
+  group_by(Group_DTI,delinq_2yrs) %>%
+  summarize(LoanNum = sum(Histogram))
+
+# Bi- Variate on home_ownership " and Group_DTI for "Charged off" Loans
+
+ggplot(charged_off,aes(x=factor(home_ownership),fill=factor(Group_DTI)))+
+  geom_bar(position="fill")+
+  geom_text(aes(label=scales::number(..count..)),
+            stat='count',position=position_fill(vjust=0.5))
+
+# Grouping of "Home ownership " and "Group_DTI"
+
+bi_dti_homeOwnership <- charged_off %>% 
+  group_by(Group_DTI,home_ownership) %>%
+  summarize(LoanNum = sum(Histogram))
+
+# Grouping of "Verification Status " and "Group_DTI"
+
+bi_dti_verify <- charged_off %>% 
+  group_by(Group_DTI,verification_status) %>%
+  summarize(LoanNum = sum(Histogram))
+
+# Bi- Variate on "Verification Status " and Group_DTI for "Charged off" Loans
+
+ggplot(charged_off,aes(x=factor(verification_status),fill=factor(Group_DTI)))+
+  geom_bar(position="fill")+
+  geom_text(aes(label=scales::number(..count..)),
+            stat='count',position=position_fill(vjust=0.5))
+
+# Grouping of "Annual income " and "Group_DTI"
+
+bi_dti_income <- charged_off %>% 
+  group_by(Group_DTI,Group_annual_inc) %>%
+  summarize(LoanNum = sum(Histogram))
+
+# Multivariate on "verification_status,Group_util,Group_creditlines,Group_DTI" for- "Charged Accounts"
+
+mulVariaChargedLoans <- charged_off %>% 
+  group_by(verification_status,Group_util,Group_creditlines,Group_DTI) %>%
+  summarize(LoanNum = sum(Histogram))
+
+# Multivariate on "verification_status,Group_util,Group_creditlines,Group_DTI" for- "Fully paid accounts"
+
+
+mulVariafullypaidoffLoans <- fullyPaidOff %>% 
+  group_by(verification_status,Group_util,Group_creditlines,Group_DTI) %>%
+  summarize(LoanNum = sum(Histogram))
+
+mulVariateDF <- merge(mulVariafullypaidoffLoans,mulVariaChargedLoans,by.x=c("verification_status", "Group_util","Group_creditlines","Group_DTI"), by.y=c("verification_status", "Group_util","Group_creditlines","Group_DTI"))
+
+
+
+setnames(mulVariateDF, "LoanNum.x", "Fully_Paid")
+setnames(mulVariateDF, "LoanNum.y", "Charged_Off")
+
+#Calculate Probability of Default
+mulVariateDF$ProbabilityOfPayment <- 100 * (mulVariateDF$Fully_Paid / (mulVariateDF$Fully_Paid + mulVariateDF$Charged_Off))
+
+#Apply probability on predictiveloans = Current
+
+mulVariaCurrentLoans <- predictiveloans %>% 
+  group_by(verification_status,Group_util,Group_creditlines,Group_DTI) %>%
+  summarize(LoanNum = sum(Histogram))
+
+
+mulVariatePredictiveDF <- merge(mulVariaCurrentLoans,mulVariateDF, by.x=c("verification_status", "Group_util","Group_creditlines","Group_DTI"), by.y=c("verification_status", "Group_util","Group_creditlines","Group_DTI"), all.x=TRUE)
+
+setnames(mulVariatePredictiveDF, "LoanNum", "Current Loan")
+
+#Apply Probability of Default on Current loans
+mulVariatePredictiveDF$Prob_Chargedln <- mulVariatePredictiveDF$`Current Loan` - round(mulVariatePredictiveDF$`Current Loan` * (mulVariatePredictiveDF$ProbabilityOfPayment/100),digits = 0)
+write.csv(mulVariatePredictiveDF,'probability.csv')
+View(mulVariatePredictiveDF)
+#178 of 1140 Current loans identified to convert into Charged off loans based on Probability of default.
+
+#####End of Code - Refer PPT##################
